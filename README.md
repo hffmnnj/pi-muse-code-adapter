@@ -119,6 +119,11 @@ Install the package alongside Pi AI:
 npm install github:hffmnnj/pi-muse-code-adapter @earendil-works/pi-ai
 ```
 
+If your npm policy rejects Git dependencies with `EALLOWGIT`, keep that policy.
+From a reviewed source checkout, run `npm install && npm pack`, then install the
+generated `.tgz` in your application alongside Pi AI. Packed installation is
+verified and does not require enabling npm Git fetching.
+
 ```ts
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createMuseProvider } from "pi-muse-code-adapter";
