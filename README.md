@@ -57,6 +57,11 @@ npm install
 pi install /absolute/path/to/pi-muse-code-adapter
 ```
 
+Pi loads the source extension directly, so its production-only Git installer
+does not need TypeScript or a generated `dist` directory. Source-checkout and
+npm Git-package preparation build the programmatic exports when development
+dependencies are present.
+
 The package is installable from GitHub; it is not yet published to npm.
 
 ## Models

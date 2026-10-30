@@ -26,6 +26,8 @@
     "src",
     "dist",
     "examples",
+    "scripts/prepare.mjs",
+    "tsconfig.json",
     "README.md",
     "LICENSE"
   ],
@@ -39,7 +41,7 @@
     "test:live": "tsx scripts/smoke-live.ts",
     "test:cli": "tsx scripts/smoke-cli.ts",
     "format:check": "prettier --check src test scripts examples README.md package.json tsconfig.json",
-    "prepare": "npm run build"
+    "prepare": "node scripts/prepare.mjs"
   },
   "devDependencies": {
     "@earendil-works/chord": "1.3.0",
