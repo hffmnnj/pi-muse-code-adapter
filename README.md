@@ -1,139 +1,320 @@
-# pi-muse-code
+# pi-muse-code-adapter
 
-Pi extension that registers a `muse-code` model provider backed by the
-Muse Code agent, through the TypeScript SDK
-[`@muse-code/sdk`](https://www.npmjs.com/package/@muse-code/sdk) over
-**MSP** (the Muse Session Protocol) against a long-lived `muse serve` host.
+**Muse Code subscription models for Pi and Pi Durable.**
 
-Switching models mid-session (e.g. grok → muse → grok) resumes the same
-muse session instead of re-sending the whole conversation as text on
-every turn.
+Use Spark, Wonder, Wonder Full, and contributor models through one native Pi
+provider. Pi keeps your tools, approvals, conversation history, and durable
+execution. Requests go directly to Meta's Responses API using your Muse login.
 
-Uses your local `muse` CLI login, not the Muse OAuth API.
+[Quick start](#quick-start) · [Models](#models) · [Pi Durable](#pi-durable) ·
+[API](#configuration) · [Authentication](#authentication) · [Development](#development)
 
-## Requirements
+## What you get
 
-- Pi 0.85.1 (verified; other 0.8x versions likely work)
-- Node 20 or newer (the MSP SDK's floor)
-- The `muse` CLI on `PATH` (or `PI_MUSE_BINARY` pointing at it), logged in.
-  The SDK drives it as `muse serve`. Muse 1.3.x pairs with SDK 1.3.x; a
-  protocol-fingerprint mismatch is a warning, not a failure.
-- No `pi-muse-bridge` alongside this package; remove it if installed
-  (`pi remove npm:pi-muse-bridge`) to avoid two extensions registering the
-  same `muse-code` provider id.
+- **Regular Pi extension** and **programmatic provider** from the same package.
+- **Nine bundled chat models**, plus discovery of new Spark and Wonder models.
+- **Text and image input**, incremental answers, readable reasoning summaries,
+  tool-call streaming, token usage, prompt caching, and cancellation.
+- **Host-owned tools.** Pi executes calls and enforces its own approval policy.
+  No hidden Muse agent, child CLI, session host, or second permission system.
+- **Durable-friendly history.** Native Pi preserves call IDs, tool results,
+  images, and encrypted reasoning replay data instead of folding a transcript
+  into a shortened text prompt.
+- **Subscription authentication.** Reuse `muse login` or Pi's Muse OAuth login;
+  no silent fallback to pay-as-you-go environment keys.
 
-## Install
+This is an unofficial adapter. Your subscription entitlements, contributor
+data-use terms, and Meta's service terms still apply.
 
-```sh
-# from source (until published)
-npm install            # pulls @muse-code/sdk for the extension
-pi install ~/pi-muse-code
-# or after cloning your fork
-pi install git:github.com/zereight/pi-muse-code
+## Quick start
+
+Requires **Node.js 22.19+** and **Pi 1.3+** from `@earendil-works/pi-coding-agent`.
+
+```bash
+# Already signed in with Muse Code? Skip this step.
+muse login
+
+pi install git:github.com/hffmnnj/pi-muse-code-adapter
 ```
 
-Then reload the running Pi session:
+Reload Pi with `/reload`, then select a `muse-code` model with `/model`.
+You can also start directly:
 
-```sh
-/reload
+```bash
+pi --model muse-code/muse-spark-1.3-contributor --thinking high
 ```
 
-## Behavior
+Remove an older Muse extension first if it also registers `muse-code`:
 
-- Registers the `muse-code` provider directly (`pi.registerProvider("muse-code", ...)`),
-  with models read from Muse's local model catalog.
-- **One `muse serve` host per Pi process** (`src/host.ts`), spawned lazily on
-  the first `muse-code` turn and shut down on `session_shutdown`. Turns are
-  `turn/start` commands on an open session, so a turn pays no process spawn
-  or handshake.
-- **One muse session per Pi conversation**, keyed by the Pi session file. Its
-  muse session id is written to `~/.pi/agent/muse-code-sessions/<hash>` so a Pi
-  restart (or `/resume` of an old conversation) resumes the same muse session
-  instead of starting cold. A marker that no longer resolves — pruned log, or
-  `sessionInUse` from another live host — falls back to a fresh session.
-- The first `muse-code` turn of a fresh session folds the full prior Pi
-  conversation (other models included) into the prompt, since there's nothing
-  to resume yet. Every later turn sends the newest user message plus a
-  **catch-up** of the turns other models ran since muse last answered
-  (`buildCatchUpPrompt`), so grok → muse → grok → muse keeps muse current
-  without re-sending what it already saw.
-- **Switching muse models keeps the session**: a different muse model id is
-  applied with `session/setModel`, and the next turn runs on it with the same
-  memory. A resumed session gets the selected model the same way. When the
-  host rejects the model (`invalid_model`), a fresh session with the
-  conversation folded in takes over.
-- Bounded fold: keeps the newest 20 turns and 12,000 chars
-  (`MAX_PRIOR_TURNS`, `MAX_PRIOR_CHARS` in `src/fold.ts`). Any single
-  prior message (e.g. a huge tool result) is additionally capped at 2,000
-  chars (`MAX_MESSAGE_CHARS`) so one big tool dump can't crowd the real
-  conversation out of the budget.
-- Non-text blocks (toolCall args, images) are skipped, not serialized.
-- Answer text streams from typed `item/delta` events; tool output stays out
-  rather than rendered as the reply.
-- **Progress is visible**: reasoning summaries stream into a Pi thinking
-  block, and tool calls, shell runs, subagents, and workflow transitions
-  add one line each (`tool <name> <args>`, outcome on completion). The live
-  working line shows the latest activity, so a muse turn never looks stuck.
-  Progress is capped (200 lines, 20,000 chars per turn) and never becomes
-  Pi tool calls.
-- Token usage comes from the turn's own counters, falling back to the
-  session's counted-once `session/tokenUsage` when a host reports no
-  per-turn aggregate.
-- **Approvals**: `PI_MUSE_SANDBOXED=1` or `--muse-sandboxed` runs the host with
-  Muse's sandbox on and starts sessions in `onRequest` approval mode; each
-  host approval request is answered through Pi's own selector. Deny-only
-  choices are picked when no UI is available. Without the flag the host runs
-  sandbox-free in `allowAll` mode.
-- **Aborting a turn** sends `turn/interrupt` to the host, so the agent stops
-  working instead of silently finishing in the background.
-- Host stderr is not parsed; the SDK reports failures through typed errors
-  (`MuseHostDiedError`, `MspError`), and a dead host is respawned on the next
-  turn.
-
-## Limits
-
-- A resumed session's earlier items are **not** in the client-side fold: the
-  SDK has not shipped snapshot ingestion yet. The host still has the whole
-  conversation — model memory is intact — but only items from the current
-  process show up in `session.fold`.
-- Catch-up shares the fold bounds, so a long detour through other models
-  reaches muse truncated to the newest turns.
-- The first `muse-code` turn in a Pi process pays the `muse serve` startup
-  (a few seconds). Later turns reuse the host.
-- One host per Pi process. Two Pi processes on the same conversation will
-  fight over the session; the loser refolds into a fresh session.
-- This package only owns the `muse-code` chat provider used by `/model`;
-  Pi's separate Task-subagent delegation feature is out of scope here.
-  `agents/muse-spark.md` in this repo is just the system prompt used for
-  `muse-code` chat turns (MSP has no system-prompt parameter, so it is
-  still prepended to each prompt).
-
-## Origin
-
-Model catalog reading and provider structure adapted from
-[pi-muse-bridge](https://github.com/ferdousbhai/pi-muse-bridge) by
-ferdousbhai (MIT).
-
-## Test
-
-```sh
-node --test test/*.test.mjs     # includes an echo-provider MSP round trip (skipped without `muse`)
-node scripts/smoke-live.mjs     # optional: real provider, spends tokens
+```bash
+pi remove git:github.com/zereight/pi-muse-code
 ```
 
-`test/msp.test.mjs` starts real `muse serve` hosts against Muse's `echo`
-provider, so it is free but slow (~45s), and it leaves session records in
-Muse's own session log directory. The echo route only accepts `muse-spark`,
-so a real switch between catalog models is checked by the live smoke script.
+For a local checkout:
 
-There is no build step; Pi loads the extension through jiti. A strict
-typecheck is still worth running after changes:
-
-```sh
-npx tsc --noEmit --allowImportingTsExtensions --module nodenext \
-  --moduleResolution nodenext --target es2022 --strict --skipLibCheck src/*.ts
+```bash
+npm install
+pi install /absolute/path/to/pi-muse-code-adapter
 ```
 
-## License
+The package is installable from GitHub; it is not yet published to npm.
 
-MIT
+## Models
+
+Every model below is registered without requiring a local model-cache file.
+Hidden contributor entries are included deliberately.
+
+| Family          | Model IDs                                                  |
+| --------------- | ---------------------------------------------------------- |
+| Spark 1.1       | `muse-spark-1.1`                                           |
+| Spark 1.2       | `muse-spark-1.2`, `muse-spark-1.2-contributor`             |
+| Spark 1.3       | `muse-spark-1.3`, `muse-spark-1.3-contributor`             |
+| Wonder 1.0      | `muse-wonder-1.0`, `muse-wonder-1.0-contributor`           |
+| Wonder Full 1.0 | `muse-wonder-full-1.0`, `muse-wonder-full-1.0-contributor` |
+
+The provider merges these defaults with Muse's local model catalog. Pi's model
+refresh also discovers new chat-capable Spark and Wonder IDs from Meta's live
+catalog. Registration does not grant access: model availability still depends
+on your plan, account, region, and current service policy. Wonder Full requires
+an eligible higher-tier plan.
+
+**Contributor privacy:** contributor models carry Muse's notice that your
+content, including inter-session messages, may be used for product improvement.
+Choose a non-contributor model when that policy does not fit your work.
+
+Local catalog limits take precedence. The current Spark 1.2/1.3 and Wonder
+defaults are **1,007,997 context tokens / 128,000 output tokens**. Unknown models
+and Spark 1.1 use conservative **128,000 / 8,192** limits until local metadata
+supplies better values. Token usage is reported by the native provider; price
+estimates are not a statement of subscription billing, and missing prices are
+not a promise of free access.
+
+### Reasoning
+
+Pi's `minimal`, `low`, `medium`, `high`, `xhigh`, and `max` controls are supported.
+`max` is clamped to a model's effective supported tier. Because Meta does not
+support disabling reasoning for these models, `off` maps to `minimal`.
+
+Readable summaries are requested automatically. They may be omitted by the
+service. Encrypted reasoning data is retained for replay and is never presented
+as readable chain-of-thought.
+
+### What “all models” means here
+
+This provider exposes **chat-capable Muse models**. Image-generation,
+transcription, and segmentation endpoints such as `muse-image-1.0`,
+`muse-voice-transcribe-1.0`, and `sam-3.1` are not misrepresented as chat models.
+Image **input** to Spark/Wonder is supported through Pi's normal image blocks.
+
+## Programmatic Pi
+
+Install the package alongside Pi AI:
+
+```bash
+npm install github:hffmnnj/pi-muse-code-adapter @earendil-works/pi-ai
+```
+
+```ts
+import { createModels } from "@earendil-works/pi-ai/models";
+import { createMuseProvider } from "pi-muse-code-adapter";
+
+const models = createModels();
+models.setProvider(createMuseProvider());
+
+const model = models.getModel("muse-code", "muse-spark-1.3-contributor");
+if (!model) throw new Error("Muse model unavailable");
+
+const stream = models.streamSimple(
+  model,
+  {
+    messages: [
+      { role: "user", content: "Hello, Muse.", timestamp: Date.now() },
+    ],
+  },
+  { reasoning: "high", signal: AbortSignal.timeout(90_000) },
+);
+
+for await (const event of stream) {
+  if (event.type === "text_delta") process.stdout.write(event.delta);
+}
+
+const answer = await stream.result();
+if (answer.stopReason === "error" || answer.stopReason === "aborted") {
+  throw new Error(answer.errorMessage ?? "Muse request failed");
+}
+```
+
+Use the usual Pi tool definitions and tool-result messages. The adapter changes
+neither tool arguments nor the executor. See [examples/programmatic.ts](examples/programmatic.ts).
+
+## Pi Durable
+
+Register the same provider in the `Models` collection supplied to your Harness:
+
+```ts
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { createModels } from "@earendil-works/pi-ai/models";
+import {
+  createRegistry,
+  Harness,
+  MemoryStorage,
+} from "@earendil-works/pi-durable";
+import { createMuseProvider } from "pi-muse-code-adapter";
+
+const models = createModels();
+models.setProvider(createMuseProvider());
+
+const harness = await Harness.open(
+  new MemoryStorage(),
+  { models, registry: createRegistry() },
+  BACKGROUND_CONTEXT,
+);
+
+try {
+  const root = await harness.root(BACKGROUND_CONTEXT, {
+    agent: {
+      model: { provider: "muse-code", modelId: "muse-spark-1.3-contributor" },
+      thinkingLevel: "high",
+    },
+  });
+  const submission = await root.submit(
+    { type: "input", content: "Hello, Muse." },
+    BACKGROUND_CONTEXT,
+  );
+  await submission.wait(BACKGROUND_CONTEXT);
+} finally {
+  await harness.close(BACKGROUND_CONTEXT);
+}
+```
+
+Install your tools in the Durable registry as usual. Durable owns scheduling,
+approval, storage, and recovery; this package supplies model inference. Use a
+persistent Pi Durable storage implementation for conversations that must survive
+process restarts. [examples/durable.ts](examples/durable.ts) includes answer extraction.
+
+### Existing `meta` model references
+
+If an application already selects `{ provider: "meta", modelId: ... }`, replace
+its `metaProvider()` registration without changing saved references:
+
+```ts
+models.setProvider(
+  createMuseProvider({
+    providerId: "meta",
+    useCliAuth: false,
+  }),
+);
+```
+
+**Multi-user servers:** keep your existing per-user Pi `CredentialStore` and
+set `useCliAuth: false`. This prevents a missing user credential from falling
+back to the server operator's ambient Muse CLI login. Do not share an operator's
+credential file across tenants or copy credentials into tool sandboxes.
+
+## Authentication
+
+With CLI authentication enabled, the adapter reads:
+
+```text
+MUSE_AUTH_PATH
+  or ${XDG_CONFIG_HOME:-~/.config}/muse/auth.json
+```
+
+Only an OAuth profile is accepted. Its identity token is exchanged at
+`https://api.meta.ai/muse-code/key`; only the returned active-subscription model
+key reaches `/v1/responses`. The profile is not rewritten. Cached CLI API keys,
+`META_API_KEY`, and `MUSE_API_KEY` are not automatic fallbacks.
+
+Pi's existing Meta OAuth implementation is also available through the provider's
+normal login UI. That path uses Pi's credential store and does not require a
+Muse CLI profile. Ambient CLI authentication is a convenience for single-user
+workstations; disable it in hosted applications as shown above.
+
+Model requests are restricted to the trusted Meta Responses endpoint, with
+redirects refused. Keep credentials server-side. An explicitly injected `fetch`
+implementation is trusted application code and must not forward requests or
+headers to an untrusted destination.
+
+## Configuration
+
+```ts
+createMuseProvider({
+  providerId: "muse-code", // use "meta" to preserve existing model references
+  useCliAuth: true, // false for per-user credential-store-only servers
+  authPath: "/secure/path/to/muse/auth.json", // optional CLI profile override
+  catalogDir: "/path/to/muse/model-catalog", // optional metadata override
+  fetch: globalThis.fetch, // optional trusted transport, e.g. instrumentation
+});
+```
+
+Caller timeouts, abort signals, retry settings, session IDs, and payload/response
+callbacks are preserved. Payload callbacks run before compatibility adaptation;
+raw provider-event observers remain read-only and can see wire-level aliases.
+
+### Tool compatibility
+
+The current Muse gateway rejects some standalone command-tool names. For this
+provider only, `shell` is advertised as `run_command` and `bash` as
+`execute_command`. Returned names are restored before Pi dispatches them.
+History and explicit selectors use the same reversible mapping. A colliding
+independent function causes an explicit error rather than incorrect dispatch.
+
+Tool and nested schema descriptions receive neutral alternatives. Names inside
+arguments, schema literals, validation rules, user instructions, and permissions
+are preserved. The adapter does not replace Pi's system prompt.
+
+## Development
+
+Run these commands from a source checkout; test and smoke scripts are not
+included in the package tarball.
+
+```bash
+npm install
+npm run build
+npm test
+npm run typecheck
+npm run format:check
+
+# Opt-in checks using your login and subscription allowance:
+npm run test:live
+npm run test:cli
+```
+
+Offline tests use synthetic credentials and injected HTTP responses. Live smoke
+checks verify host-owned tool execution and model continuation; they never print
+credentials or private reasoning. Pi 1.3.0 is the compatibility baseline.
+
+### Verified coverage
+
+| Check                                                                            | Result                                                     |
+| -------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| All nine bundled chat models                                                     | Real subscription responses on the test account            |
+| Regular Pi CLI 1.3.0                                                             | Native `bash` execution, final answer, clean process exit  |
+| Pi AI + Pi Durable 1.3.0                                                         | Tool round trips and file-backed close/reopen continuation |
+| Packed install with Pi AI + Pi Durable 1.4.0                                     | Tool round trips and persisted history replay              |
+| Images, summaries, usage, aliases, callbacks, cancellation, credential isolation | Offline native-transport regressions                       |
+
+The live tool checks use Spark 1.3 Contributor. Model availability can differ for
+your account; the nine-model check does not promise every plan has every model.
+
+Pi 1.3 currently reports a cancellation during its pre-provider authentication
+setup as an `error`. Once this provider is running, cancellation is reported as
+`aborted` and propagates to the native HTTP transport. This upstream classification
+does not cause a model request after a pre-aborted signal.
+
+The pinned Pi 1.3 CLI used for development currently inherits `undici` audit
+advisories. The adapter adds no runtime dependencies beyond its Pi AI peer;
+keep the host Pi installation updated. Do not use `npm audit fix --force` to
+downgrade Pi below this adapter's supported API version.
+
+## Origin and license
+
+Forked from [zereight/pi-muse-code](https://github.com/zereight/pi-muse-code).
+Its Muse model-catalog work originated in
+[ferdousbhai/pi-muse-bridge](https://github.com/ferdousbhai/pi-muse-bridge).
+The upstream Git history and MIT license are retained.
+
+This fork replaces the MSP-driven Muse agent with direct Pi-owned inference;
+the original child-host/session-fold implementation is no longer used.
+
+[MIT](LICENSE)
