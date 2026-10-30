@@ -57,6 +57,11 @@ npm install
 pi install /absolute/path/to/pi-muse-code-adapter
 ```
 
+Pi loads the source extension directly, so its production-only Git installer
+does not need TypeScript or a generated `dist` directory. Source-checkout and
+npm Git-package preparation build the programmatic exports when development
+dependencies are present.
+
 The package is installable from GitHub; it is not yet published to npm.
 
 ## Models
@@ -113,6 +118,11 @@ Install the package alongside Pi AI:
 ```bash
 npm install github:hffmnnj/pi-muse-code-adapter @earendil-works/pi-ai
 ```
+
+If your npm policy rejects Git dependencies with `EALLOWGIT`, keep that policy.
+From a reviewed source checkout, run `npm install && npm pack`, then install the
+generated `.tgz` in your application alongside Pi AI. Packed installation is
+verified and does not require enabling npm Git fetching.
 
 ```ts
 import { createModels } from "@earendil-works/pi-ai/models";

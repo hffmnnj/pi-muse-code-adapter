@@ -1,4 +1,4 @@
-import type { Provider } from "@earendil-works/pi-ai/models";
+import type { Provider } from "@earendil-works/pi-ai";
 import { createMuseProvider } from "./provider.ts";
 
 interface MuseExtensionAPI {

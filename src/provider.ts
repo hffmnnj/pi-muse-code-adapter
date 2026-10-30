@@ -1,16 +1,16 @@
 import {
   createAssistantMessageEventStream,
+  createProvider,
   type Api,
   type AssistantMessage,
   type AssistantMessageEvent,
   type Model,
   type ProviderStreams,
+  type Provider,
   type StreamOptions,
   type ToolCall,
 } from "@earendil-works/pi-ai";
-import { openAIResponsesApi } from "@earendil-works/pi-ai/api/openai-responses.lazy";
-import { createProvider, type Provider } from "@earendil-works/pi-ai/models";
-import { metaProvider } from "@earendil-works/pi-ai/providers/meta";
+import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import { readMuseOAuthToken, resolveMuseSubscriptionKey } from "./core/auth.ts";
 import { fetchMuseCatalog, getMuseCatalog } from "./core/catalog.ts";
 import {
@@ -148,9 +148,22 @@ export function createMuseProvider(
   options: MuseProviderOptions = {},
 ): Provider<"openai-responses"> {
   const providerId = options.providerId ?? "muse-code";
-  const meta = metaProvider();
-  const native = openAIResponsesApi();
-  const baseline = new Map(meta.getModels().map((model) => [model.id, model]));
+  // Pi injects these public SDK entrypoints for dependency-free Git extensions.
+  const meta = builtinProviders().find((provider) => provider.id === "meta");
+  if (!meta)
+    throw new Error(
+      "This Pi installation does not provide the native Meta transport.",
+    );
+  const native: ProviderStreams = meta;
+  const baseline = new Map(
+    meta
+      .getModels()
+      .filter(
+        (model): model is Model<"openai-responses"> =>
+          model.api === "openai-responses",
+      )
+      .map((model) => [model.id, model]),
+  );
   const models = (catalog: MuseCatalogModel[]) =>
     catalog.map((entry) =>
       modelDefinition(entry, providerId, baseline.get(entry.id)),
