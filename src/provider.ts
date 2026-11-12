@@ -11,7 +11,11 @@ import {
   type ToolCall,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import { readMuseOAuthToken, resolveMuseSubscriptionKey } from "./core/auth.ts";
+import {
+  invalidateMuseSubscriptionKeys,
+  readMuseOAuthToken,
+  resolveMuseSubscriptionKey,
+} from "./core/auth.ts";
 import { fetchMuseCatalog, getMuseCatalog } from "./core/catalog.ts";
 import {
   MUSE_BASE_URL,
@@ -95,10 +99,10 @@ function modelDefinition(
   providerId: string,
   baseline?: Model<"openai-responses">,
 ): Model<"openai-responses"> {
-  const wonder = entry.id.includes("wonder");
+  const maxCapable = /wonder|ember/.test(entry.id);
   const max =
     baseline?.thinkingLevelMap?.max ??
-    (wonder || (!entry.contributor && entry.efforts.includes("max"))
+    (maxCapable || (!entry.contributor && entry.efforts.includes("max"))
       ? "max"
       : "xhigh");
   return {
@@ -201,9 +205,13 @@ export function createMuseProvider(
             museHeaders(key, requestOptions?.sessionId),
           ))
             headers.set(name, value);
-          return trustedFetch(
+          const response = await trustedFetch(
             new Request(request, { headers, redirect: "error" }),
           );
+          // Re-mint on the next request instead of reusing a rejected key.
+          if (response.status === 401 || response.status === 403)
+            invalidateMuseSubscriptionKeys();
+          return response;
         };
         const adaptedOptions: StreamOptions = {
           ...requestOptions,

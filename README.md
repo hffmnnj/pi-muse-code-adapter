@@ -12,7 +12,7 @@ execution. Requests go directly to Meta's Responses API using your Muse login.
 ## What you get
 
 - **Regular Pi extension** and **programmatic provider** from the same package.
-- **Nine bundled chat models**, plus discovery of new Spark and Wonder models.
+- **Ten bundled chat models**, plus discovery of new Spark, Ember, and Wonder models.
 - **Text and image input**, incremental answers, readable reasoning summaries,
   tool-call streaming, token usage, prompt caching, and cancellation.
 - **Host-owned tools.** Pi executes calls and enforces its own approval policy.
@@ -74,11 +74,12 @@ Hidden contributor entries are included deliberately.
 | Spark 1.1       | `muse-spark-1.1`                                           |
 | Spark 1.2       | `muse-spark-1.2`, `muse-spark-1.2-contributor`             |
 | Spark 1.3       | `muse-spark-1.3`, `muse-spark-1.3-contributor`             |
+| Ember 1.0       | `muse-ember-1.0`                                           |
 | Wonder 1.0      | `muse-wonder-1.0`, `muse-wonder-1.0-contributor`           |
 | Wonder Full 1.0 | `muse-wonder-full-1.0`, `muse-wonder-full-1.0-contributor` |
 
 The provider merges these defaults with Muse's local model catalog. Pi's model
-refresh also discovers new chat-capable Spark and Wonder IDs from Meta's live
+refresh also discovers new chat-capable Spark, Ember, and Wonder IDs from Meta's live
 catalog. Registration does not grant access: model availability still depends
 on your plan, account, region, and current service policy. Wonder Full requires
 an eligible higher-tier plan.
@@ -87,7 +88,7 @@ an eligible higher-tier plan.
 content, including inter-session messages, may be used for product improvement.
 Choose a non-contributor model when that policy does not fit your work.
 
-Local catalog limits take precedence. The current Spark 1.2/1.3 and Wonder
+Local catalog limits take precedence. The current Spark 1.2/1.3, Ember, and Wonder
 defaults are **1,007,997 context tokens / 128,000 output tokens**. Unknown models
 and Spark 1.1 use conservative **128,000 / 8,192** limits until local metadata
 supplies better values. Token usage is reported by the native provider; price
@@ -235,6 +236,12 @@ Only an OAuth profile is accepted. Its identity token is exchanged at
 key reaches `/v1/responses`. The profile is not rewritten. Cached CLI API keys,
 `META_API_KEY`, and `MUSE_API_KEY` are not automatic fallbacks.
 
+The exchange is retried up to three times for transient failures (network errors
+such as `ECONNRESET`, timeouts, HTTP 408/425/429/5xx), and the final error names
+the sanitized cause, for example `(ECONNRESET)` or `(HTTP 503)`. The minted key
+is cached in memory for five minutes and shared by concurrent requests; the cache
+is dropped when the model API answers 401 or 403.
+
 Pi's existing Meta OAuth implementation is also available through the provider's
 normal login UI. That path uses Pi's credential store and does not require a
 Muse CLI profile. Ambient CLI authentication is a convenience for single-user
@@ -298,14 +305,14 @@ credentials or private reasoning. Pi 1.3.0 is the compatibility baseline.
 
 | Check                                                                            | Result                                                     |
 | -------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| All nine bundled chat models                                                     | Real subscription responses on the test account            |
+| All ten bundled chat models                                                      | Real subscription responses on the test account            |
 | Regular Pi CLI 1.3.0                                                             | Native `bash` execution, final answer, clean process exit  |
 | Pi AI + Pi Durable 1.3.0                                                         | Tool round trips and file-backed close/reopen continuation |
 | Packed install with Pi AI + Pi Durable 1.4.0                                     | Tool round trips and persisted history replay              |
 | Images, summaries, usage, aliases, callbacks, cancellation, credential isolation | Offline native-transport regressions                       |
 
 The live tool checks use Spark 1.3 Contributor. Model availability can differ for
-your account; the nine-model check does not promise every plan has every model.
+your account; the ten-model check does not promise every plan has every model.
 
 Pi 1.3 currently reports a cancellation during its pre-provider authentication
 setup as an `error`. Once this provider is running, cancellation is reported as

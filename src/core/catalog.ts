@@ -16,6 +16,7 @@ const BASELINE_IDS = [
   "muse-spark-1.2-contributor",
   "muse-spark-1.3",
   "muse-spark-1.3-contributor",
+  "muse-ember-1.0",
   "muse-wonder-1.0",
   "muse-wonder-1.0-contributor",
   "muse-wonder-full-1.0",
@@ -27,15 +28,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 function isChatId(id: string): boolean {
   return (
-    /^muse-(?:spark|wonder)(?:-|$)/i.test(id) &&
+    /^muse-(?:spark|wonder|ember)(?:-|$)/i.test(id) &&
     !/(?:^|-)(?:image|voice|sam)(?:-|$)/i.test(id)
   );
 }
 function limits(
   id: string,
 ): Pick<MuseCatalogModel, "contextWindow" | "maxTokens"> {
-  // Muse 1.2/1.3 and Wonder catalog limits; unknown models use a conservative fallback.
-  return /^(?:muse-spark-1\.[23]|muse-wonder(?:-full)?-1\.0)(?:-contributor)?$/i.test(
+  // Muse 1.2/1.3, Ember, and Wonder catalog limits; unknown models use a conservative fallback.
+  return /^(?:muse-spark-1\.[23]|muse-ember-1\.0|muse-wonder(?:-full)?-1\.0)(?:-contributor)?$/i.test(
     id,
   )
     ? { contextWindow: 1_007_997, maxTokens: 128_000 }

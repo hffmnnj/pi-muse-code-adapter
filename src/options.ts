@@ -15,6 +15,8 @@ export interface MuseAuthOptions {
   authPath?: string;
   fetch?: typeof globalThis.fetch;
   signal?: AbortSignal;
+  /** Base delay between key-mint retries in milliseconds. Tests set 0. */
+  retryDelayMs?: number;
 }
 
 export interface MuseCatalogModel {
