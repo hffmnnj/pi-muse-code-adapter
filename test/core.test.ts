@@ -4,6 +4,7 @@ import { mkdtemp, writeFile, unlink, rmdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  invalidateMuseSubscriptionKeys,
   readMuseOAuthToken,
   resolveMuseSubscriptionKey,
 } from "../src/core/auth.js";
@@ -138,6 +139,73 @@ test("billing credentials are never used and invalid minted subscriptions or des
   }
 });
 
+test("key mint retries transient failures, shares and caches one result, and names a sanitized cause", async () => {
+  await fixture({ "auth.json": oauth }, async (dir) => {
+    const authPath = join(dir, "auth.json");
+    try {
+      const steps: Array<() => Response> = [
+        () => {
+          throw Object.assign(new TypeError("oauth-secret"), {
+            cause: { code: "ECONNRESET" },
+          });
+        },
+        () => new Response("unavailable", { status: 503 }),
+        () => Response.json({ is_subs_active: true, api_key: "minted-key" }),
+      ];
+      let calls = 0;
+      const flaky: typeof globalThis.fetch = async () => steps[calls++]!();
+      const keys = await Promise.all([
+        resolveMuseSubscriptionKey({ authPath, fetch: flaky, retryDelayMs: 0 }),
+        resolveMuseSubscriptionKey({ authPath, fetch: flaky, retryDelayMs: 0 }),
+      ]);
+      assert.deepEqual(keys, ["minted-key", "minted-key"]);
+      assert.equal(calls, 3);
+      assert.equal(
+        await resolveMuseSubscriptionKey({
+          authPath,
+          fetch: async () => assert.fail("cache must serve"),
+        }),
+        "minted-key",
+      );
+
+      invalidateMuseSubscriptionKeys();
+      let attempts = 0;
+      await assert.rejects(
+        resolveMuseSubscriptionKey({
+          authPath,
+          retryDelayMs: 0,
+          fetch: async () => {
+            attempts++;
+            throw Object.assign(new Error("oauth-secret"), {
+              cause: { code: "ECONNRESET" },
+            });
+          },
+        }),
+        (error: Error) =>
+          error.message.includes("(ECONNRESET)") &&
+          !error.message.includes("oauth-secret"),
+      );
+      assert.equal(attempts, 3);
+
+      attempts = 0;
+      await assert.rejects(
+        resolveMuseSubscriptionKey({
+          authPath,
+          retryDelayMs: 0,
+          fetch: async () => {
+            attempts++;
+            return new Response("denied", { status: 401 });
+          },
+        }),
+        /muse login/,
+      );
+      assert.equal(attempts, 1, "login rejection must not be retried");
+    } finally {
+      invalidateMuseSubscriptionKeys();
+    }
+  });
+});
+
 test("catalog cancellation stops before requests, and transport errors do not expose credentials", async () => {
   await fixture({ "auth.json": oauth }, async (dir) => {
     const authPath = join(dir, "auth.json");
@@ -190,7 +258,7 @@ test("catalog keeps baseline contributors, merges current local metadata, and ex
     },
     async (dir) => {
       const local = getMuseCatalog({ catalogDir: dir });
-      assert.equal(local.length, 9);
+      assert.equal(local.length, 10);
       assert.deepEqual(
         local.find((model) => model.id === "muse-spark-1.3-contributor"),
         {
@@ -205,7 +273,7 @@ test("catalog keeps baseline contributors, merges current local metadata, and ex
       assert.equal(local.filter((m) => m.contributor).length, 4);
       assert.equal(
         getMuseCatalog({ catalogDir: join(dir, "missing") }).length,
-        9,
+        10,
       );
       const authPath = join(dir, "auth.json");
       await writeFile(authPath, JSON.stringify(oauth));
@@ -232,7 +300,7 @@ test("catalog keeps baseline contributors, merges current local metadata, and ex
           authPath,
           fetch,
         });
-        assert.equal(remote.length, 10);
+        assert.equal(remote.length, 11);
         assert.equal(
           remote.find((m) => m.id === "muse-spark-2.0")?.contextWindow,
           128000,

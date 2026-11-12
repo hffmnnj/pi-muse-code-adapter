@@ -255,8 +255,8 @@ test("native transport mints credentials, adapts tools and restores streamed cal
     assert.equal(refresh.errors.size, 0);
     assert.equal(
       requests,
-      4,
-      "refresh must mint once and then fetch the catalog",
+      3,
+      "the stream mints once; refresh reuses the cached key and fetches the catalog",
     );
     assert(models.getModel("muse-code", "muse-spark-2.0"));
   } finally {
@@ -390,7 +390,7 @@ test("regular extension registers the full catalog under its public provider ID"
   });
   assert.ok(provider);
   assert.equal(provider.id, "muse-code");
-  assert.equal(provider.getModels().length, 9);
+  assert.equal(provider.getModels().length, 10);
   assert.ok(
     provider.getModels().every((model) => model.provider === "muse-code"),
   );
@@ -429,7 +429,7 @@ test("server mode never falls back to an operator's ambient CLI profile", async 
         useCliAuth: false,
       }),
     );
-    assert.equal((await models.getAvailable("workstation")).length, 9);
+    assert.equal((await models.getAvailable("workstation")).length, 10);
     assert.equal((await models.getAvailable("server")).length, 0);
     const credential = {
       type: "oauth" as const,
